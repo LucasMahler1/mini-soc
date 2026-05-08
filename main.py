@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import datetime
 
 failed_logins = {}
@@ -6,7 +7,7 @@ attack_times = {}
 
 threshold = 3
 
-log_file = open("sample_auth.log", "r")
+log_file = open("/var/log/auth.log", "r")
 
 for line in log_file:
 
@@ -20,8 +21,8 @@ for line in log_file:
         if ip_match:
             ip_address = ip_match.group(1)
 
-            timestamp_text = " ".join(line.split()[:3])
-            timestamp = datetime.strptime(timestamp_text, "%b %d %H:%M:%S")
+            timestamp_text = line.split()[0]
+            timestamp = datetime.fromisoformat(timestamp_text)
 
             if ip_address in failed_logins:
                 failed_logins[ip_address] += 1
@@ -70,5 +71,8 @@ for alert in alerts:
 alert_file.close()
 
 print("\nAlerts saved to alerts.txt")
+
+print("Monitoring complete.")
+
     
 
