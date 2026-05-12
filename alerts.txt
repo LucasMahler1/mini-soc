@@ -1,1 +1,2 @@
-[ALERT] Possible brute force attack from 192.168.56.104 (6 failed attempts)
+[ALERT] Severity: MEDIUM - Possible brute force attack from 192.168.1.10 (3 failed attempts)
+[ALERT] Severity: MEDIUM - Possible brute force attack from 203.0.113.5 (3 failed attempts)

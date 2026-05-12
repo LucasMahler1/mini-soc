@@ -1,0 +1,26 @@
+[
+    {
+        "ip_address": "192.168.1.10",
+        "failed_attempt_count": 3,
+        "severity": "MEDIUM",
+        "attack_timestamps": [
+            "2026-06-10 10:01:22",
+            "2026-06-10 10:01:45",
+            "2026-06-10 10:02:10"
+        ],
+        "attack_duration": "0:00:48",
+        "generated_at": "2026-05-12 12:01:44.229088"
+    },
+    {
+        "ip_address": "203.0.113.5",
+        "failed_attempt_count": 3,
+        "severity": "MEDIUM",
+        "attack_timestamps": [
+            "2026-06-10 10:03:01",
+            "2026-06-10 10:03:12",
+            "2026-06-10 10:03:30"
+        ],
+        "attack_duration": "0:00:29",
+        "generated_at": "2026-05-12 12:01:44.229548"
+    }
+]
