@@ -41,11 +41,10 @@ def save_alerts(alerts):
     with open("alerts.json", "w") as f:
         json.dump(alerts, f, indent=4)
 
-def create_alert(ip_address, timestamps):
+def create_alert(ip_address, timestamps, usernames):
     """Create an alert in the same format as main.py."""
     count = len(timestamps)
     severity = get_severity(count)
-
     first_attempt = timestamps[0]
     last_attempt = timestamps[-1]
     attack_duration = last_attempt - first_attempt
@@ -54,14 +53,14 @@ def create_alert(ip_address, timestamps):
         "ip_address": ip_address,
         "failed_attempt_count": count,
         "severity": severity,
+        "targeted_usernames": list(set(usernames)),
         "attack_timestamps": [str(ts) for ts in timestamps],
         "attack_duration": str(attack_duration),
         "generated_at": str(datetime.now())
     }
-
     return alert
 
-def update_alert(ip_address, timestamps):
+def update_alert(ip_address, timestamps, usernames):
     """Update an existing alert or append a new one."""
     alerts = load_alerts()
     count = len(timestamps)
@@ -70,12 +69,12 @@ def update_alert(ip_address, timestamps):
     last_attempt = timestamps[-1]
     attack_duration = last_attempt - first_attempt
 
-    # Create or update the alert entry for this IP.
     updated = False
     for alert in alerts:
         if alert.get("ip_address") == ip_address:
             alert["failed_attempt_count"] = count
             alert["severity"] = severity
+            alert["targeted_usernames"] = list(set(usernames))
             alert["attack_timestamps"] = [str(ts) for ts in timestamps]
             alert["attack_duration"] = str(attack_duration)
             alert["generated_at"] = str(datetime.now())
@@ -87,6 +86,7 @@ def update_alert(ip_address, timestamps):
             "ip_address": ip_address,
             "failed_attempt_count": count,
             "severity": severity,
+            "targeted_usernames": list(set(usernames)),
             "attack_timestamps": [str(ts) for ts in timestamps],
             "attack_duration": str(attack_duration),
             "generated_at": str(datetime.now())
@@ -96,58 +96,80 @@ def update_alert(ip_address, timestamps):
     return updated
 
 def extract_ip_and_time(line):
-    """Extract IP address and timestamp from log line."""
+    """Extract IP address, username, and timestamp from log line."""
     # Extract IP address
     ip_match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
     if not ip_match:
-        return None, None
-    
+        return None, None, None
     ip_address = ip_match.group(1)
-    
-    # Extract timestamp (format: Jun 10 10:01:22)
+
+    # Extract username — handles both "for invalid user X" and "for X"
+    user_match = re.search(r"for (?:invalid user )?(\S+) from", line)
+    username = user_match.group(1) if user_match else "unknown"
+
+    # Extract timestamp
     parts = line.split()
     try:
         timestamp_text = f"{datetime.now().year} {parts[0]} {parts[1]} {parts[2]}"
         timestamp = datetime.strptime(timestamp_text, "%Y %b %d %H:%M:%S")
     except (ValueError, IndexError):
         timestamp = datetime.now()
-    
-    return ip_address, timestamp
+
+    return ip_address, username, timestamp
+
+# Track usernames per IP in memory
+targeted_usernames = defaultdict(list)
 
 # Start reading the log file
 with open(log_file_path, "r") as log_file:
     log_file.seek(0, 2)
-
     while True:
         line = log_file.readline()
-
         if not line:
             time.sleep(1)
             continue
 
+        # Pattern 1 — Failed password (existing detection, now with username)
         if "Failed password" in line:
-            ip_address, timestamp = extract_ip_and_time(line)
-            
+            ip_address, username, timestamp = extract_ip_and_time(line)
+
             if ip_address:
                 print("[FAILED LOGIN DETECTED]")
-                print(f"IP: {ip_address} | Time: {timestamp}")
-                
-                # Add timestamp to this IP's attempts
+                print(f"IP: {ip_address} | User: {username} | Time: {timestamp}")
+
                 failed_attempts[ip_address].append(timestamp)
-                
+                targeted_usernames[ip_address].append(username)
+
                 attempt_count = len(failed_attempts[ip_address])
                 print(f"Attempts from {ip_address}: {attempt_count}\n")
-                
-                # If this IP reaches threshold, update or create the alert.
-                if attempt_count >= threshold:
-                    updated = update_alert(ip_address, failed_attempts[ip_address])
-                    severity = get_severity(attempt_count)
 
+                if attempt_count >= threshold:
+                    updated = update_alert(ip_address, failed_attempts[ip_address], targeted_usernames[ip_address])
+                    severity = get_severity(attempt_count)
                     if updated:
                         print(f"⚠️  ALERT UPDATED for {ip_address}!")
                     else:
                         print(f"⚠️  ALERT CREATED for {ip_address}!")
-
                     print(f"Severity: {severity}")
                     print("alerts.json updated\n")
+
+        # Pattern 2 — Invalid user probe
+        elif "Invalid user" in line:
+            ip_match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
+            user_match = re.search(r"Invalid user (\S+) from", line)
+            if ip_match and user_match:
+                ip = ip_match.group(1)
+                user = user_match.group(1)
+                print(f"[INVALID USER PROBE] IP: {ip} probed non-existent username: {user}")
+
+        # Pattern 3 — Successful login after failures (critical)
+        elif "Accepted password" in line or "Accepted publickey" in line:
+            ip_match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
+            user_match = re.search(r"for (\S+) from", line)
+            if ip_match:
+                ip = ip_match.group(1)
+                user = user_match.group(1) if user_match else "unknown"
+                if ip in failed_attempts and len(failed_attempts[ip]) >= threshold:
+                    print(f"🚨 CRITICAL: Successful login from {ip} as {user} AFTER {len(failed_attempts[ip])} failed attempts!")
+                    update_alert(ip, failed_attempts[ip], targeted_usernames[ip])
             
