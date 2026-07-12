@@ -6,6 +6,7 @@ from datetime import datetime
 from collections import defaultdict
 
 log_file_path = "/var/log/auth.log"
+state_file_path = "state.json"
 
 # Track failed attempts per IP in memory
 failed_attempts = defaultdict(list)
@@ -25,6 +26,33 @@ def get_severity(count):
         return "MEDIUM"
     else:
         return "HIGH"
+    
+def save_state(failed_attempts, targeted_usernames):
+    """Save in-memory state to disk so monitor can survive restarts."""
+    state = {
+        "failed_attempts": {ip: [str(ts) for ts in timestamps] for ip, timestamps in failed_attempts.items()},
+        "targeted_usernames": dict(targeted_usernames)
+    }
+    with open(state_file_path, "w") as f:
+        json.dump(state, f, indent=4)
+
+def load_state():
+    """Load state from disk on startup."""
+    if os.path.exists(state_file_path):
+        try:
+            with open(state_file_path, "r") as f:
+                state = json.load(f)
+            failed_attempts = defaultdict(list)
+            targeted_usernames = defaultdict(list)
+            for ip, timestamps in state.get("failed_attempts", {}).items():
+                failed_attempts[ip] = [datetime.strptime(ts, "%Y-%m-%d %H:%M:%S") for ts in timestamps]
+            for ip, usernames in state.get("targeted_usernames", {}).items():
+                targeted_usernames[ip] = usernames
+            print(f"State loaded from disk — resuming tracking for {len(failed_attempts)} IPs")
+            return failed_attempts, targeted_usernames
+        except (json.JSONDecodeError, ValueError):
+            print("Could not load state file, starting fresh")
+    return defaultdict(list), defaultdict(list)
 
 def load_alerts():
     """Load existing alerts from alerts.json."""
@@ -117,8 +145,8 @@ def extract_ip_and_time(line):
 
     return ip_address, username, timestamp
 
-# Track usernames per IP in memory
-targeted_usernames = defaultdict(list)
+# Load state from disk on startup (survives restarts)
+failed_attempts, targeted_usernames = load_state()
 
 # Start reading the log file
 with open(log_file_path, "r") as log_file:
@@ -145,6 +173,7 @@ with open(log_file_path, "r") as log_file:
 
                 if attempt_count >= threshold:
                     updated = update_alert(ip_address, failed_attempts[ip_address], targeted_usernames[ip_address])
+                    save_state(failed_attempts, targeted_usernames)
                     severity = get_severity(attempt_count)
                     if updated:
                         print(f"⚠️  ALERT UPDATED for {ip_address}!")
