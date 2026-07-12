@@ -271,6 +271,7 @@ def dashboard():
                             <th>IP Address</th>
                             <th>Severity</th>
                             <th>Failed Attempts</th>
+                            <th>Targeted Usernames</th>
                             <th>Attack Duration</th>
                             <th>Generated At</th>
                         </tr>
@@ -280,6 +281,7 @@ def dashboard():
                                 <td>{{ alert.ip_address }}</td>
                                 <td class="{{ alert.severity }}">{{ alert.severity }}</td>
                                 <td>{{ alert.failed_attempt_count }}</td>
+                                <td>{{ alert.get('targeted_usernames', ['N/A']) | join(', ') }}</td>
                                 <td>{{ alert.attack_duration }}</td>
                                 <td>{{ alert.generated_at }}</td>
                             </tr>
@@ -332,19 +334,15 @@ def dashboard():
             let chartsCreated = false;
 
             function showTab(tabName) {
-                // Hide all tab contents
                 const contents = document.querySelectorAll('.tab-content');
                 contents.forEach(content => content.classList.remove('active'));
 
-                // Remove active class from buttons
                 const buttons = document.querySelectorAll('.tab-button');
                 buttons.forEach(button => button.classList.remove('active'));
 
-                // Show selected tab
                 document.getElementById(tabName).classList.add('active');
                 event.target.classList.add('active');
 
-                // Create charts if charts tab is selected and not created yet
                 if (tabName === 'charts' && !chartsCreated) {
                     createCharts();
                     chartsCreated = true;
