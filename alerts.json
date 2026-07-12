@@ -5,11 +5,15 @@
         "severity": "MEDIUM",
         "attack_timestamps": [
             "2026-06-10 10:01:22",
-            "2026-06-10 10:01:45",
-            "2026-06-10 10:02:10"
+            "2026-06-10 10:02:10",
+            "2026-06-10 10:01:22"
         ],
-        "attack_duration": "0:00:48",
-        "generated_at": "2026-05-12 13:30:56.357188"
+        "attack_duration": "0:00:00",
+        "generated_at": "2026-07-12 19:24:15.026310",
+        "targeted_usernames": [
+            "test",
+            "admin"
+        ]
     },
     {
         "ip_address": "203.0.113.5",
