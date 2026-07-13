@@ -101,5 +101,28 @@
         ],
         "attack_duration": "0:00:50",
         "generated_at": "2026-05-12 13:30:56.360092"
+    },
+    {
+        "ip_address": "10.10.10.10",
+        "failed_attempt_count": 6,
+        "severity": "HIGH",
+        "targeted_usernames": [
+            "user",
+            "root",
+            "admin",
+            "test",
+            "ftp",
+            "oracle"
+        ],
+        "attack_timestamps": [
+            "2026-06-10 10:01:22",
+            "2026-06-10 10:01:30",
+            "2026-06-10 10:01:40",
+            "2026-06-10 10:02:00",
+            "2026-06-10 10:03:00",
+            "2026-06-10 10:03:10"
+        ],
+        "attack_duration": "0:01:48",
+        "generated_at": "2026-07-12 20:30:37.833456"
     }
 ]
