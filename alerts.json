@@ -124,5 +124,17 @@
         ],
         "attack_duration": "0:01:48",
         "generated_at": "2026-07-12 20:30:37.833456"
+    },
+    {
+        "alert_type": "SUDO_FAILURE",
+        "username": "lucas-mahler",
+        "severity": "MEDIUM",
+        "generated_at": "2026-07-12 20:50:29"
+    },
+    {
+        "alert_type": "NEW_USER_CREATED",
+        "username": "backdoortest2",
+        "severity": "HIGH",
+        "generated_at": "2026-07-12 20:51:15"
     }
 ]
