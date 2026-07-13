@@ -18,6 +18,41 @@ print("Mini SOC live monitor started...")
 print("Watching for failed SSH login attempts...")
 print(f"Alert threshold: {threshold} failed attempts\n")
 
+def extract_timestamp(line):
+    """Extract timestamp from log line, handles both formats."""
+    iso_match = re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", line)
+    if iso_match:
+        try:
+            return datetime.strptime(iso_match.group(1), "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            pass
+    parts = line.split()
+    try:
+        timestamp_text = f"{datetime.now().year} {parts[0]} {parts[1]} {parts[2]}"
+        return datetime.strptime(timestamp_text, "%Y %b %d %H:%M:%S")
+    except (ValueError, IndexError):
+        return datetime.now()
+
+def detect_sudo_failure(line):
+    """Detect failed sudo attempts — privilege escalation indicator."""
+    if "pam_unix(sudo:auth): authentication failure" in line:
+        user_match = re.search(r"logname=(\S+)", line)
+        username = user_match.group(1) if user_match else "unknown"
+        timestamp = extract_timestamp(line)
+        print(f"[SUDO FAILURE] User '{username}' failed sudo authentication at {timestamp}")
+        return username, timestamp
+    return None, None
+
+def detect_new_user(line):
+    """Detect new user creation — backdoor persistence indicator."""
+    if "useradd" in line and "new user:" in line:
+        user_match = re.search(r"name=(\S+),", line)
+        username = user_match.group(1) if user_match else "unknown"
+        timestamp = extract_timestamp(line)
+        print(f"🚨 NEW USER CREATED: '{username}' — possible backdoor at {timestamp}")
+        return username, timestamp
+    return None, None
+
 def block_ip(ip_address):
     """Block an IP address using iptables."""
     import subprocess
@@ -149,13 +184,23 @@ def extract_ip_and_time(line):
     user_match = re.search(r"for (?:invalid user )?(\S+) from", line)
     username = user_match.group(1) if user_match else "unknown"
 
-    # Extract timestamp
-    parts = line.split()
-    try:
-        timestamp_text = f"{datetime.now().year} {parts[0]} {parts[1]} {parts[2]}"
-        timestamp = datetime.strptime(timestamp_text, "%Y %b %d %H:%M:%S")
-    except (ValueError, IndexError):
-        timestamp = datetime.now()
+    # Extract timestamp — handles both formats:
+    # Format 1: Jun 10 10:01:22 (SSH logs)
+    # Format 2: 2026-07-12T20:38:50 (sudo/system logs)
+    timestamp = None
+    iso_match = re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", line)
+    if iso_match:
+        try:
+            timestamp = datetime.strptime(iso_match.group(1), "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            pass
+    if not timestamp:
+        parts = line.split()
+        try:
+            timestamp_text = f"{datetime.now().year} {parts[0]} {parts[1]} {parts[2]}"
+            timestamp = datetime.strptime(timestamp_text, "%Y %b %d %H:%M:%S")
+        except (ValueError, IndexError):
+            timestamp = datetime.now()
 
     return ip_address, username, timestamp
 
@@ -222,4 +267,10 @@ with open(log_file_path, "r") as log_file:
                 if ip in failed_attempts and len(failed_attempts[ip]) >= threshold:
                     print(f"🚨 CRITICAL: Successful login from {ip} as {user} AFTER {len(failed_attempts[ip])} failed attempts!")
                     update_alert(ip, failed_attempts[ip], targeted_usernames[ip])
-            
+        # Pattern 4 — Sudo failure (privilege escalation attempt)
+        elif "pam_unix(sudo:auth): authentication failure" in line:
+            detect_sudo_failure(line)
+
+        # Pattern 5 — New user creation (backdoor persistence)
+        elif "useradd" in line and "new user:" in line:
+            detect_new_user(line)
