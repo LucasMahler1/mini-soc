@@ -275,7 +275,18 @@ with open(log_file_path, "r") as log_file:
             if ip_match and user_match:
                 ip = ip_match.group(1)
                 user = user_match.group(1)
+                timestamp = extract_timestamp(line)
                 print(f"[INVALID USER PROBE] IP: {ip} probed non-existent username: {user}")
+                alerts = load_alerts()
+                alerts.append({
+                    "alert_type": "INVALID_USER_PROBE",
+                    "ip_address": ip,
+                    "username": user,
+                    "severity": "LOW",
+                    "generated_at": str(timestamp)
+                })
+                save_alerts(alerts)
+                print("alerts.json updated\n") 
 
         # Pattern 3 — Successful login after failures (critical)
         elif "Accepted password" in line or "Accepted publickey" in line:
