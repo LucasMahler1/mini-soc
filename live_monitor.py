@@ -40,6 +40,16 @@ def detect_sudo_failure(line):
         username = user_match.group(1) if user_match else "unknown"
         timestamp = extract_timestamp(line)
         print(f"[SUDO FAILURE] User '{username}' failed sudo authentication at {timestamp}")
+
+        alerts = load_alerts()
+        alerts.append({
+            "alert_type": "SUDO_FAILURE",
+            "username": username,
+            "severity": "MEDIUM",
+            "generated_at": str(timestamp)
+        })
+        save_alerts(alerts)
+        print("alerts.json updated\n")
         return username, timestamp
     return None, None
 
@@ -50,6 +60,16 @@ def detect_new_user(line):
         username = user_match.group(1) if user_match else "unknown"
         timestamp = extract_timestamp(line)
         print(f"🚨 NEW USER CREATED: '{username}' — possible backdoor at {timestamp}")
+
+        alerts = load_alerts()
+        alerts.append({
+            "alert_type": "NEW_USER_CREATED",
+            "username": username,
+            "severity": "HIGH",
+            "generated_at": str(timestamp)
+        })
+        save_alerts(alerts)
+        print("alerts.json updated\n")
         return username, timestamp
     return None, None
 
