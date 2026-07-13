@@ -32,7 +32,8 @@ def dashboard():
 
     ip_attempts = defaultdict(int)
     for alert in alerts:
-        ip_attempts[alert['ip_address']] += alert['failed_attempt_count']
+        if 'ip_address' in alert and 'failed_attempt_count' in alert:
+            ip_attempts[alert['ip_address']] += alert['failed_attempt_count']
     ip_labels = list(ip_attempts.keys())
     attempts_data = list(ip_attempts.values())
 
@@ -268,7 +269,8 @@ def dashboard():
                 {% if alerts %}
                     <table>
                         <tr>
-                            <th>IP Address</th>
+                            <th>Alert Type</th>
+                            <th>IP / User</th>
                             <th>Severity</th>
                             <th>Failed Attempts</th>
                             <th>Targeted Usernames</th>
@@ -278,11 +280,12 @@ def dashboard():
 
                         {% for alert in alerts %}
                             <tr>
-                                <td>{{ alert.ip_address }}</td>
+                                <td>{{ alert.get('alert_type', 'BRUTE_FORCE') }}</td>
+                                <td>{{ alert.get('ip_address', alert.get('username', 'N/A')) }}</td>
                                 <td class="{{ alert.severity }}">{{ alert.severity }}</td>
-                                <td>{{ alert.failed_attempt_count }}</td>
+                                <td>{{ alert.get('failed_attempt_count', 'N/A') }}</td>
                                 <td>{{ alert.get('targeted_usernames', ['N/A']) | join(', ') }}</td>
-                                <td>{{ alert.attack_duration }}</td>
+                                <td>{{ alert.get('attack_duration', 'N/A') }}</td>
                                 <td>{{ alert.generated_at }}</td>
                             </tr>
                         {% endfor %}
