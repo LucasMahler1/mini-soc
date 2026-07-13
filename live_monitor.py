@@ -18,6 +18,20 @@ print("Mini SOC live monitor started...")
 print("Watching for failed SSH login attempts...")
 print(f"Alert threshold: {threshold} failed attempts\n")
 
+def block_ip(ip_address):
+    """Block an IP address using iptables."""
+    import subprocess
+    try:
+        subprocess.run(
+            ["sudo", "iptables", "-A", "INPUT", "-s", ip_address, "-j", "DROP"],
+            check=True
+        )
+        print(f"🔒 BLOCKED: {ip_address} added to iptables DROP rule")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to block {ip_address}: {e}")
+        return False
+
 def get_severity(count):
     """Determine severity based on number of failed attempts."""
     if count <= 2:
@@ -147,6 +161,7 @@ def extract_ip_and_time(line):
 
 # Load state from disk on startup (survives restarts)
 failed_attempts, targeted_usernames = load_state()
+blocked_ips = set()
 
 # Start reading the log file
 with open(log_file_path, "r") as log_file:
@@ -181,6 +196,12 @@ with open(log_file_path, "r") as log_file:
                         print(f"⚠️  ALERT CREATED for {ip_address}!")
                     print(f"Severity: {severity}")
                     print("alerts.json updated\n")
+
+                    # Auto-block if HIGH severity and not already blocked
+                    if severity == "HIGH" and ip_address not in blocked_ips:
+                        print(f"🚨 HIGH severity detected — auto-blocking {ip_address}...")
+                        if block_ip(ip_address):
+                            blocked_ips.add(ip_address)
 
         # Pattern 2 — Invalid user probe
         elif "Invalid user" in line:
