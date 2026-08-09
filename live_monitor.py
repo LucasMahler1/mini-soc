@@ -46,6 +46,7 @@ def detect_sudo_failure(line):
             "alert_type": "SUDO_FAILURE",
             "username": username,
             "severity": "MEDIUM",
+            "status": "Open",
             "generated_at": str(timestamp)
         })
         save_alerts(alerts)
@@ -66,6 +67,7 @@ def detect_new_user(line):
             "alert_type": "NEW_USER_CREATED",
             "username": username,
             "severity": "HIGH",
+            "status": "Open",
             "generated_at": str(timestamp)
         })
         save_alerts(alerts)
@@ -186,6 +188,7 @@ def update_alert(ip_address, timestamps, usernames):
             "targeted_usernames": list(set(usernames)),
             "attack_timestamps": [str(ts) for ts in timestamps],
             "attack_duration": str(attack_duration),
+            "status": "Open",
             "generated_at": str(datetime.now())
         })
 
@@ -283,6 +286,7 @@ with open(log_file_path, "r") as log_file:
                     "ip_address": ip,
                     "username": user,
                     "severity": "LOW",
+                    "status": "Open",
                     "generated_at": str(timestamp)
                 })
                 save_alerts(alerts)
