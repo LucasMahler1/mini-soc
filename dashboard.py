@@ -1,5 +1,5 @@
 import json
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request
 from collections import defaultdict
 
 app = Flask(__name__)
@@ -17,10 +17,28 @@ def load_alerts():
         return []
 
 
+def save_alerts(alerts):
+    with open("alerts.json", "w") as f:
+        json.dump(alerts, f, indent=4)
+
+
 @app.route("/api/alerts")
 def api_alerts():
     alerts = load_alerts()
     return json.dumps(alerts)
+
+
+@app.route("/api/update_status", methods=["POST"])
+def update_status():
+    data = request.get_json()
+    index = data.get("index")
+    new_status = data.get("status")
+    alerts = load_alerts()
+    if index is not None and 0 <= index < len(alerts):
+        alerts[index]["status"] = new_status
+        save_alerts(alerts)
+        return json.dumps({"success": True})
+    return json.dumps({"success": False}), 400
 
 
 @app.route("/")
@@ -82,7 +100,7 @@ def dashboard():
             }
 
             th, td {
-                padding: 15px;
+                padding: 12px 15px;
                 text-align: left;
                 border-bottom: 1px solid #333;
             }
@@ -115,6 +133,31 @@ def dashboard():
             .HIGH {
                 color: #ff4500;
                 font-weight: bold;
+            }
+
+            .status-btn {
+                padding: 5px 10px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                font-weight: bold;
+                transition: background 0.2s;
+            }
+
+            .status-Open {
+                background: #cc0000;
+                color: white;
+            }
+
+            .status-Investigating {
+                background: #ff8c00;
+                color: white;
+            }
+
+            .status-Resolved {
+                background: #2e7d32;
+                color: white;
             }
 
             .card-container {
@@ -255,7 +298,7 @@ def dashboard():
                 <h1>Mini SOC Dashboard</h1>
 
                 <div class="card-container">
-                    <div class="card" id="card-total">
+                    <div class="card">
                         <h3 id="total-alerts">{{ total_alerts }}</h3>
                         <p>Total Alerts</p>
                     </div>
@@ -283,6 +326,7 @@ def dashboard():
                             <th>Targeted Usernames</th>
                             <th>Attack Duration</th>
                             <th>Generated At</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody id="alert-table-body">
@@ -295,6 +339,7 @@ def dashboard():
                                 <td>{{ alert.get('targeted_usernames', ['N/A']) | join(', ') }}</td>
                                 <td>{{ alert.get('attack_duration', 'N/A') }}</td>
                                 <td>{{ alert.generated_at }}</td>
+                                <td>{{ alert.get('status', 'Open') }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -338,6 +383,22 @@ def dashboard():
             </div>
         </div>
         <script>
+            const statusCycle = ['Open', 'Investigating', 'Resolved'];
+
+            function cycleStatus(index, currentStatus) {
+                const nextStatus = statusCycle[(statusCycle.indexOf(currentStatus) + 1) % statusCycle.length];
+                fetch('/api/update_status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ index: index, status: nextStatus })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) fetchAlerts();
+                })
+                .catch(err => console.error('Failed to update status:', err));
+            }
+
             function fetchAlerts() {
                 fetch('/api/alerts')
                     .then(response => response.json())
@@ -346,7 +407,7 @@ def dashboard():
                         if (!tbody) return;
                         tbody.innerHTML = '';
                         let low = 0, medium = 0, high = 0;
-                        alerts.forEach(alert => {
+                        alerts.forEach((alert, index) => {
                             const row = document.createElement('tr');
                             const alertType = alert.alert_type || 'BRUTE_FORCE';
                             const ipUser = alert.ip_address || alert.username || 'N/A';
@@ -355,6 +416,7 @@ def dashboard():
                             const usernames = alert.targeted_usernames ? alert.targeted_usernames.join(', ') : 'N/A';
                             const duration = alert.attack_duration || 'N/A';
                             const generatedAt = alert.generated_at || 'N/A';
+                            const status = alert.status || 'Open';
                             if (severity === 'LOW') low++;
                             if (severity === 'MEDIUM') medium++;
                             if (severity === 'HIGH') high++;
@@ -366,6 +428,7 @@ def dashboard():
                                 <td>${usernames}</td>
                                 <td>${duration}</td>
                                 <td>${generatedAt}</td>
+                                <td><button class="status-btn status-${status}" onclick="cycleStatus(${index}, '${status}')">${status}</button></td>
                             `;
                             tbody.appendChild(row);
                         });
