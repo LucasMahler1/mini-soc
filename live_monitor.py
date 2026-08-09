@@ -26,7 +26,6 @@ def normalize_timestamp(dt):
 
 def extract_timestamp(line):
     """Extract and normalize timestamp from log line, handles both formats."""
-    # Format 1: 2026-07-12T20:38:50 (ISO format)
     iso_match = re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", line)
     if iso_match:
         try:
@@ -34,7 +33,6 @@ def extract_timestamp(line):
             return dt
         except ValueError:
             pass
-    # Format 2: Jun 10 10:01:22 (syslog format)
     parts = line.split()
     try:
         timestamp_text = f"{datetime.now().year} {parts[0]} {parts[1]} {parts[2]}"
@@ -230,86 +228,111 @@ def extract_ip_and_time(line):
     return ip_address, username, timestamp
 
 
+def open_log_file(path):
+    """Open log file and seek to end."""
+    log_file = open(path, "r")
+    log_file.seek(0, 2)
+    return log_file
+
+
+def check_log_rotated(log_file, path):
+    """Check if the log file has been rotated by comparing inode numbers."""
+    try:
+        current_inode = os.fstat(log_file.fileno()).st_ino
+        new_inode = os.stat(path).st_ino
+        return current_inode != new_inode
+    except (OSError, FileNotFoundError):
+        return True
+
+
 # Load state from disk on startup (survives restarts)
 failed_attempts, targeted_usernames = load_state()
 blocked_ips = set()
 
 # Start reading the log file
-with open(log_file_path, "r") as log_file:
-    log_file.seek(0, 2)
-    while True:
-        line = log_file.readline()
-        if not line:
-            time.sleep(1)
-            continue
+print("Opening log file...")
+log_file = open_log_file(log_file_path)
 
-        # Pattern 1 — Failed password
-        if "Failed password" in line:
-            ip_address, username, timestamp = extract_ip_and_time(line)
+while True:
+    line = log_file.readline()
 
-            if ip_address:
-                print("[FAILED LOGIN DETECTED]")
-                print(f"IP: {ip_address} | User: {username} | Time: {normalize_timestamp(timestamp)}")
+    if not line:
+        # Check for log rotation every time we hit EOF
+        if check_log_rotated(log_file, log_file_path):
+            print("⚠️  Log rotation detected — reopening log file...")
+            log_file.close()
+            log_file = open_log_file(log_file_path)
+            print("✅ Log file reopened successfully")
+        time.sleep(1)
+        continue
 
-                failed_attempts[ip_address].append(timestamp)
-                targeted_usernames[ip_address].append(username)
+    # Pattern 1 — Failed password
+    if "Failed password" in line:
+        ip_address, username, timestamp = extract_ip_and_time(line)
 
-                attempt_count = len(failed_attempts[ip_address])
-                print(f"Attempts from {ip_address}: {attempt_count}\n")
+        if ip_address:
+            print("[FAILED LOGIN DETECTED]")
+            print(f"IP: {ip_address} | User: {username} | Time: {normalize_timestamp(timestamp)}")
 
-                if attempt_count >= threshold:
-                    updated = update_alert(ip_address, failed_attempts[ip_address], targeted_usernames[ip_address])
-                    save_state(failed_attempts, targeted_usernames)
-                    severity = get_severity(attempt_count)
-                    if updated:
-                        print(f"⚠️  ALERT UPDATED for {ip_address}!")
-                    else:
-                        print(f"⚠️  ALERT CREATED for {ip_address}!")
-                    print(f"Severity: {severity}")
-                    print("alerts.json updated\n")
+            failed_attempts[ip_address].append(timestamp)
+            targeted_usernames[ip_address].append(username)
 
-                    # Auto-block if HIGH severity and not already blocked
-                    if severity == "HIGH" and ip_address not in blocked_ips:
-                        print(f"🚨 HIGH severity detected — auto-blocking {ip_address}...")
-                        if block_ip(ip_address):
-                            blocked_ips.add(ip_address)
+            attempt_count = len(failed_attempts[ip_address])
+            print(f"Attempts from {ip_address}: {attempt_count}\n")
 
-        # Pattern 2 — Invalid user probe
-        elif "Invalid user" in line:
-            ip_match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
-            user_match = re.search(r"Invalid user (\S+) from", line)
-            if ip_match and user_match:
-                ip = ip_match.group(1)
-                user = user_match.group(1)
-                timestamp = extract_timestamp(line)
-                print(f"[INVALID USER PROBE] IP: {ip} probed non-existent username: {user}")
-                alerts = load_alerts()
-                alerts.append({
-                    "alert_type": "INVALID_USER_PROBE",
-                    "ip_address": ip,
-                    "username": user,
-                    "severity": "LOW",
-                    "status": "Open",
-                    "generated_at": normalize_timestamp(timestamp)
-                })
-                save_alerts(alerts)
+            if attempt_count >= threshold:
+                updated = update_alert(ip_address, failed_attempts[ip_address], targeted_usernames[ip_address])
+                save_state(failed_attempts, targeted_usernames)
+                severity = get_severity(attempt_count)
+                if updated:
+                    print(f"⚠️  ALERT UPDATED for {ip_address}!")
+                else:
+                    print(f"⚠️  ALERT CREATED for {ip_address}!")
+                print(f"Severity: {severity}")
                 print("alerts.json updated\n")
 
-        # Pattern 3 — Successful login after failures (critical)
-        elif "Accepted password" in line or "Accepted publickey" in line:
-            ip_match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
-            user_match = re.search(r"for (\S+) from", line)
-            if ip_match:
-                ip = ip_match.group(1)
-                user = user_match.group(1) if user_match else "unknown"
-                if ip in failed_attempts and len(failed_attempts[ip]) >= threshold:
-                    print(f"🚨 CRITICAL: Successful login from {ip} as {user} AFTER {len(failed_attempts[ip])} failed attempts!")
-                    update_alert(ip, failed_attempts[ip], targeted_usernames[ip])
+                # Auto-block if HIGH severity and not already blocked
+                if severity == "HIGH" and ip_address not in blocked_ips:
+                    print(f"🚨 HIGH severity detected — auto-blocking {ip_address}...")
+                    if block_ip(ip_address):
+                        blocked_ips.add(ip_address)
 
-        # Pattern 4 — Sudo failure (privilege escalation attempt)
-        elif "pam_unix(sudo:auth): authentication failure" in line:
-            detect_sudo_failure(line)
+    # Pattern 2 — Invalid user probe
+    elif "Invalid user" in line:
+        ip_match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
+        user_match = re.search(r"Invalid user (\S+) from", line)
+        if ip_match and user_match:
+            ip = ip_match.group(1)
+            user = user_match.group(1)
+            timestamp = extract_timestamp(line)
+            print(f"[INVALID USER PROBE] IP: {ip} probed non-existent username: {user}")
+            alerts = load_alerts()
+            alerts.append({
+                "alert_type": "INVALID_USER_PROBE",
+                "ip_address": ip,
+                "username": user,
+                "severity": "LOW",
+                "status": "Open",
+                "generated_at": normalize_timestamp(timestamp)
+            })
+            save_alerts(alerts)
+            print("alerts.json updated\n")
 
-        # Pattern 5 — New user creation (backdoor persistence)
-        elif "useradd" in line and "new user:" in line:
-            detect_new_user(line)
+    # Pattern 3 — Successful login after failures (critical)
+    elif "Accepted password" in line or "Accepted publickey" in line:
+        ip_match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
+        user_match = re.search(r"for (\S+) from", line)
+        if ip_match:
+            ip = ip_match.group(1)
+            user = user_match.group(1) if user_match else "unknown"
+            if ip in failed_attempts and len(failed_attempts[ip]) >= threshold:
+                print(f"🚨 CRITICAL: Successful login from {ip} as {user} AFTER {len(failed_attempts[ip])} failed attempts!")
+                update_alert(ip, failed_attempts[ip], targeted_usernames[ip])
+
+    # Pattern 4 — Sudo failure (privilege escalation attempt)
+    elif "pam_unix(sudo:auth): authentication failure" in line:
+        detect_sudo_failure(line)
+
+    # Pattern 5 — New user creation (backdoor persistence)
+    elif "useradd" in line and "new user:" in line:
+        detect_new_user(line)
