@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SecureBank — Search</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .navbar {
+            background: #16213e;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #00d4ff;
+            margin-bottom: 30px;
+        }
+        .navbar h1 {
+            color: #00d4ff;
+            margin: 0;
+        }
+        .navbar a {
+            color: #ccc;
+            text-decoration: none;
+            margin-left: 20px;
+        }
+        .navbar a:hover {
+            color: #00d4ff;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 20px;
+            border: 1px solid #0f3460;
+        }
+        .card h2 {
+            color: #00d4ff;
+            margin-top: 0;
+        }
+        input {
+            width: 70%;
+            padding: 12px;
+            background: #0f3460;
+            border: 1px solid #00d4ff;
+            border-radius: 4px;
+            color: white;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 12px 24px;
+            background: #00d4ff;
+            border: none;
+            border-radius: 4px;
+            color: #1a1a2e;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        button:hover {
+            background: #0099bb;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th {
+            background: #0f3460;
+            padding: 12px;
+            text-align: left;
+            color: #00d4ff;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #0f3460;
+        }
+        tr:hover {
+            background: #0f3460;
+        }
+        .no-results {
+            color: #aaa;
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>🏦 SecureBank</h1>
+        <div>
+            <a href="/profile?id=1">Profile</a>
+            <a href="/upload">Upload</a>
+            <a href="/logout">Logout</a>
+        </div>
+    </div>
+    <div class="container">
+        <div class="card">
+            <h2>Search Users</h2>
+            <form method="POST">
+                <input type="text" name="query" placeholder="Search by username..." value="{{ query }}">
+                <button type="submit">Search</button>
+            </form>
+            {% if results %}
+                <table>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Balance</th>
+                    </tr>
+                    {% for user in results %}
+                        <tr>
+                            <td>{{ user[0] }}</td>
+                            <td>{{ user[1] }}</td>
+                            <td>${{ user[3] }}</td>
+                        </tr>
+                    {% endfor %}
+                </table>
+            {% elif query %}
+                <p class="no-results">No users found for "{{ query }}"</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

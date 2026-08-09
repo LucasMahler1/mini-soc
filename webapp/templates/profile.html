@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SecureBank — Profile</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .navbar {
+            background: #16213e;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #00d4ff;
+            margin-bottom: 30px;
+        }
+        .navbar h1 {
+            color: #00d4ff;
+            margin: 0;
+        }
+        .navbar a {
+            color: #ccc;
+            text-decoration: none;
+            margin-left: 20px;
+        }
+        .navbar a:hover {
+            color: #00d4ff;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 20px;
+            border: 1px solid #0f3460;
+        }
+        .card h2 {
+            color: #00d4ff;
+            margin-top: 0;
+        }
+        .balance {
+            font-size: 2.5em;
+            color: #00ff88;
+            font-weight: bold;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #0f3460;
+        }
+        .info-label {
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>🏦 SecureBank</h1>
+        <div>
+            <a href="/search">Search</a>
+            <a href="/upload">Upload</a>
+            <a href="/logout">Logout</a>
+        </div>
+    </div>
+    <div class="container">
+        {% if user %}
+            <div class="card">
+                <h2>Account Profile</h2>
+                <div class="info-row">
+                    <span class="info-label">Account ID</span>
+                    <span>{{ user[0] }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Username</span>
+                    <span>{{ user[1] }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Account Balance</span>
+                    <span class="balance">${{ user[3] }}</span>
+                </div>
+            </div>
+        {% else %}
+            <div class="card">
+                <p>User not found.</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
