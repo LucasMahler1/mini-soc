@@ -41,6 +41,39 @@ def extract_timestamp(line):
         return datetime.now()
 
 
+def upsert_alert(match_key, match_value, alert_type, new_data):
+    """Update an existing alert if one exists for this key/value, otherwise append a new one.
+    
+    This is the core deduplication function — prevents alert flooding.
+    match_key: the field to match on (e.g. 'ip_address', 'username')
+    match_value: the value to match (e.g. '10.10.10.10', 'lucas-mahler')
+    alert_type: the alert_type string to match on
+    new_data: dict of fields to set on the alert
+    """
+    alerts = load_alerts()
+    updated = False
+    for alert in alerts:
+        if alert.get("alert_type") == alert_type and alert.get(match_key) == match_value:
+            alert.update(new_data)
+            alert["last_seen"] = normalize_timestamp(datetime.now())
+            alert["count"] = alert.get("count", 1) + 1
+            updated = True
+            break
+    if not updated:
+        new_alert = {
+            "alert_type": alert_type,
+            match_key: match_value,
+            "status": "Open",
+            "count": 1,
+            "first_seen": normalize_timestamp(datetime.now()),
+            "last_seen": normalize_timestamp(datetime.now()),
+        }
+        new_alert.update(new_data)
+        alerts.append(new_alert)
+    save_alerts(alerts)
+    return updated
+
+
 def detect_sudo_failure(line):
     """Detect failed sudo attempts — privilege escalation indicator."""
     if "pam_unix(sudo:auth): authentication failure" in line:
@@ -49,16 +82,16 @@ def detect_sudo_failure(line):
         timestamp = extract_timestamp(line)
         print(f"[SUDO FAILURE] User '{username}' failed sudo authentication at {normalize_timestamp(timestamp)}")
 
-        alerts = load_alerts()
-        alerts.append({
-            "alert_type": "SUDO_FAILURE",
-            "username": username,
-            "severity": "MEDIUM",
-            "status": "Open",
-            "generated_at": normalize_timestamp(timestamp)
-        })
-        save_alerts(alerts)
-        print("alerts.json updated\n")
+        updated = upsert_alert(
+            match_key="username",
+            match_value=username,
+            alert_type="SUDO_FAILURE",
+            new_data={"severity": "MEDIUM", "generated_at": normalize_timestamp(timestamp)}
+        )
+        if updated:
+            print("alerts.json updated — existing SUDO_FAILURE alert incremented\n")
+        else:
+            print("alerts.json updated — new SUDO_FAILURE alert created\n")
         return username, timestamp
     return None, None
 
@@ -71,15 +104,12 @@ def detect_new_user(line):
         timestamp = extract_timestamp(line)
         print(f"🚨 NEW USER CREATED: '{username}' — possible backdoor at {normalize_timestamp(timestamp)}")
 
-        alerts = load_alerts()
-        alerts.append({
-            "alert_type": "NEW_USER_CREATED",
-            "username": username,
-            "severity": "HIGH",
-            "status": "Open",
-            "generated_at": normalize_timestamp(timestamp)
-        })
-        save_alerts(alerts)
+        upsert_alert(
+            match_key="username",
+            match_value=username,
+            alert_type="NEW_USER_CREATED",
+            new_data={"severity": "HIGH", "generated_at": normalize_timestamp(timestamp)}
+        )
         print("alerts.json updated\n")
         return username, timestamp
     return None, None
@@ -156,29 +186,8 @@ def save_alerts(alerts):
         json.dump(alerts, f, indent=4)
 
 
-def create_alert(ip_address, timestamps, usernames):
-    """Create an alert."""
-    count = len(timestamps)
-    severity = get_severity(count)
-    first_attempt = timestamps[0]
-    last_attempt = timestamps[-1]
-    attack_duration = last_attempt - first_attempt
-
-    alert = {
-        "ip_address": ip_address,
-        "failed_attempt_count": count,
-        "severity": severity,
-        "targeted_usernames": list(set(usernames)),
-        "attack_timestamps": [normalize_timestamp(ts) for ts in timestamps],
-        "attack_duration": str(attack_duration),
-        "status": "Open",
-        "generated_at": normalize_timestamp(datetime.now())
-    }
-    return alert
-
-
 def update_alert(ip_address, timestamps, usernames):
-    """Update an existing alert or append a new one."""
+    """Update an existing BRUTE_FORCE alert or append a new one."""
     alerts = load_alerts()
     count = len(timestamps)
     severity = get_severity(count)
@@ -188,7 +197,7 @@ def update_alert(ip_address, timestamps, usernames):
 
     updated = False
     for alert in alerts:
-        if alert.get("ip_address") == ip_address:
+        if alert.get("ip_address") == ip_address and alert.get("alert_type", "BRUTE_FORCE") == "BRUTE_FORCE":
             alert["failed_attempt_count"] = count
             alert["severity"] = severity
             alert["targeted_usernames"] = list(set(usernames))
@@ -200,6 +209,7 @@ def update_alert(ip_address, timestamps, usernames):
 
     if not updated:
         alerts.append({
+            "alert_type": "BRUTE_FORCE",
             "ip_address": ip_address,
             "failed_attempt_count": count,
             "severity": severity,
@@ -257,7 +267,6 @@ while True:
     line = log_file.readline()
 
     if not line:
-        # Check for log rotation every time we hit EOF
         if check_log_rotated(log_file, log_file_path):
             print("⚠️  Log rotation detected — reopening log file...")
             log_file.close()
@@ -291,7 +300,6 @@ while True:
                 print(f"Severity: {severity}")
                 print("alerts.json updated\n")
 
-                # Auto-block if HIGH severity and not already blocked
                 if severity == "HIGH" and ip_address not in blocked_ips:
                     print(f"🚨 HIGH severity detected — auto-blocking {ip_address}...")
                     if block_ip(ip_address):
@@ -306,17 +314,20 @@ while True:
             user = user_match.group(1)
             timestamp = extract_timestamp(line)
             print(f"[INVALID USER PROBE] IP: {ip} probed non-existent username: {user}")
-            alerts = load_alerts()
-            alerts.append({
-                "alert_type": "INVALID_USER_PROBE",
-                "ip_address": ip,
-                "username": user,
-                "severity": "LOW",
-                "status": "Open",
-                "generated_at": normalize_timestamp(timestamp)
-            })
-            save_alerts(alerts)
-            print("alerts.json updated\n")
+            updated = upsert_alert(
+                match_key="ip_address",
+                match_value=ip,
+                alert_type="INVALID_USER_PROBE",
+                new_data={
+                    "severity": "LOW",
+                    "username": user,
+                    "generated_at": normalize_timestamp(timestamp)
+                }
+            )
+            if updated:
+                print("alerts.json updated — existing INVALID_USER_PROBE alert incremented\n")
+            else:
+                print("alerts.json updated — new INVALID_USER_PROBE alert created\n")
 
     # Pattern 3 — Successful login after failures (critical)
     elif "Accepted password" in line or "Accepted publickey" in line:
