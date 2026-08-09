@@ -2,17 +2,21 @@ import json
 import os
 import re
 import time
+import threading
 from datetime import datetime
 from collections import defaultdict
 
 log_file_path = "/var/log/auth.log"
+web_log_path = "/var/log/apache2/securebank_access.log"
 state_file_path = "state.json"
 
 # Track failed attempts per IP in memory
 failed_attempts = defaultdict(list)
+web_login_attempts = defaultdict(list)
 
 # Threshold for triggering an alert
 threshold = 3
+web_threshold = 5
 
 print("Mini SOC live monitor started...")
 print("Watching for failed SSH login attempts...")
@@ -41,15 +45,20 @@ def extract_timestamp(line):
         return datetime.now()
 
 
+def extract_apache_fields(line):
+    """Extract IP, method, path, and status code from Apache access log line."""
+    match = re.match(r'(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) \S+" (\d+)', line)
+    if match:
+        ip = match.group(1)
+        method = match.group(3)
+        path = match.group(4)
+        status = match.group(5)
+        return ip, method, path, status
+    return None, None, None, None
+
+
 def upsert_alert(match_key, match_value, alert_type, new_data):
-    """Update an existing alert if one exists for this key/value, otherwise append a new one.
-    
-    This is the core deduplication function — prevents alert flooding.
-    match_key: the field to match on (e.g. 'ip_address', 'username')
-    match_value: the value to match (e.g. '10.10.10.10', 'lucas-mahler')
-    alert_type: the alert_type string to match on
-    new_data: dict of fields to set on the alert
-    """
+    """Update an existing alert if one exists for this key/value, otherwise append a new one."""
     alerts = load_alerts()
     updated = False
     for alert in alerts:
@@ -113,6 +122,96 @@ def detect_new_user(line):
         print("alerts.json updated\n")
         return username, timestamp
     return None, None
+
+
+def detect_web_attack(ip, method, path, status):
+    """Detect web application attacks from Apache access log."""
+    path_decoded = re.sub(r'%[0-9a-fA-F]{2}', lambda m: chr(int(m.group(0)[1:], 16)), path)
+
+    # SQLi patterns
+    sqli_patterns = [
+        r"'", r"--", r"OR\s+1=1", r"UNION\s+SELECT",
+        r"DROP\s+TABLE", r"INSERT\s+INTO", r"SELECT\s+\*",
+        r"1=1", r"admin'--", r"'\s+OR\s+'", r"SLEEP\(",
+        r"BENCHMARK\(", r"xp_cmdshell"
+    ]
+    for pattern in sqli_patterns:
+        if re.search(pattern, path_decoded, re.IGNORECASE):
+            print(f"🚨 [SQL INJECTION] IP: {ip} | Path: {path}")
+            upsert_alert(
+                match_key="ip_address",
+                match_value=ip,
+                alert_type="SQL_INJECTION",
+                new_data={
+                    "severity": "HIGH",
+                    "path": path,
+                    "generated_at": normalize_timestamp(datetime.now())
+                }
+            )
+            print("alerts.json updated\n")
+            return
+
+    # XSS patterns
+    xss_patterns = [
+        r"<script", r"</script>", r"alert\(", r"onerror=",
+        r"onload=", r"javascript:", r"<img", r"<svg",
+        r"document\.cookie", r"eval\("
+    ]
+    for pattern in xss_patterns:
+        if re.search(pattern, path_decoded, re.IGNORECASE):
+            print(f"🚨 [XSS ATTEMPT] IP: {ip} | Path: {path}")
+            upsert_alert(
+                match_key="ip_address",
+                match_value=ip,
+                alert_type="XSS_ATTEMPT",
+                new_data={
+                    "severity": "HIGH",
+                    "path": path,
+                    "generated_at": normalize_timestamp(datetime.now())
+                }
+            )
+            print("alerts.json updated\n")
+            return
+
+    # Path traversal patterns
+    traversal_patterns = [
+        r"\.\./", r"\.\.\\", r"/etc/passwd", r"/etc/shadow",
+        r"\.\.%2f", r"%2e%2e", r"\.\.%5c", r"\.\./"
+    ]
+    for pattern in traversal_patterns:
+        if re.search(pattern, path_decoded, re.IGNORECASE):
+            print(f"🚨 [PATH TRAVERSAL] IP: {ip} | Path: {path}")
+            upsert_alert(
+                match_key="ip_address",
+                match_value=ip,
+                alert_type="PATH_TRAVERSAL",
+                new_data={
+                    "severity": "HIGH",
+                    "path": path,
+                    "generated_at": normalize_timestamp(datetime.now())
+                }
+            )
+            print("alerts.json updated\n")
+            return
+
+    # Web brute force — many POST requests to /login
+    if method == "POST" and "/login" in path:
+        web_login_attempts[ip].append(datetime.now())
+        count = len(web_login_attempts[ip])
+        if count >= web_threshold:
+            print(f"🚨 [WEB BRUTE FORCE] IP: {ip} | {count} POST requests to /login")
+            upsert_alert(
+                match_key="ip_address",
+                match_value=ip,
+                alert_type="WEB_BRUTE_FORCE",
+                new_data={
+                    "severity": "HIGH",
+                    "path": path,
+                    "attempt_count": count,
+                    "generated_at": normalize_timestamp(datetime.now())
+                }
+            )
+            print("alerts.json updated\n")
 
 
 def block_ip(ip_address):
@@ -255,11 +354,40 @@ def check_log_rotated(log_file, path):
         return True
 
 
+def monitor_web_log():
+    """Monitor Apache access log for web attacks in a separate thread."""
+    print("Opening web log file...")
+    if not os.path.exists(web_log_path):
+        print(f"⚠️  Web log not found at {web_log_path} — web monitoring disabled")
+        return
+
+    web_log = open_log_file(web_log_path)
+    print("✅ Web attack monitoring active\n")
+
+    while True:
+        line = web_log.readline()
+        if not line:
+            if check_log_rotated(web_log, web_log_path):
+                print("⚠️  Web log rotation detected — reopening...")
+                web_log.close()
+                web_log = open_log_file(web_log_path)
+            time.sleep(1)
+            continue
+
+        ip, method, path, status = extract_apache_fields(line)
+        if ip and path:
+            detect_web_attack(ip, method, path, status)
+
+
 # Load state from disk on startup (survives restarts)
 failed_attempts, targeted_usernames = load_state()
 blocked_ips = set()
 
-# Start reading the log file
+# Start web log monitor in background thread
+web_thread = threading.Thread(target=monitor_web_log, daemon=True)
+web_thread.start()
+
+# Start reading the auth log file
 print("Opening log file...")
 log_file = open_log_file(log_file_path)
 
