@@ -17,6 +17,12 @@ def load_alerts():
         return []
 
 
+@app.route("/api/alerts")
+def api_alerts():
+    alerts = load_alerts()
+    return json.dumps(alerts)
+
+
 @app.route("/")
 def dashboard():
     alerts = load_alerts()
@@ -241,33 +247,34 @@ def dashboard():
             <button class="tab-button active" onclick="showTab('dashboard')">Dashboard</button>
             <button class="tab-button" onclick="showTab('charts')">Charts</button>
             <button class="tab-button" onclick="showTab('ips')">IP Addresses</button>
-            <button class="refresh-btn" onclick="location.reload()">🔄 Refresh Data</button>
+            <button class="refresh-btn" onclick="fetchAlerts()">🔄 Refresh Now</button>
+            <p style="color: #ccc; font-size: 12px; text-align: center; margin-top: 5px;">Auto-updates every 5s</p>
         </div>
         <div class="main-content">
             <div id="dashboard" class="tab-content active">
                 <h1>Mini SOC Dashboard</h1>
 
                 <div class="card-container">
-                    <div class="card">
-                        <h3>{{ total_alerts }}</h3>
+                    <div class="card" id="card-total">
+                        <h3 id="total-alerts">{{ total_alerts }}</h3>
                         <p>Total Alerts</p>
                     </div>
                     <div class="card">
-                        <h3>{{ low_count }}</h3>
+                        <h3 id="low-count">{{ low_count }}</h3>
                         <p>Low Severity</p>
                     </div>
                     <div class="card">
-                        <h3>{{ medium_count }}</h3>
+                        <h3 id="medium-count">{{ medium_count }}</h3>
                         <p>Medium Severity</p>
                     </div>
                     <div class="card">
-                        <h3>{{ high_count }}</h3>
+                        <h3 id="high-count">{{ high_count }}</h3>
                         <p>High Severity</p>
                     </div>
                 </div>
 
-                {% if alerts %}
-                    <table>
+                <table>
+                    <thead>
                         <tr>
                             <th>Alert Type</th>
                             <th>IP / User</th>
@@ -277,7 +284,8 @@ def dashboard():
                             <th>Attack Duration</th>
                             <th>Generated At</th>
                         </tr>
-
+                    </thead>
+                    <tbody id="alert-table-body">
                         {% for alert in alerts %}
                             <tr>
                                 <td>{{ alert.get('alert_type', 'BRUTE_FORCE') }}</td>
@@ -289,12 +297,8 @@ def dashboard():
                                 <td>{{ alert.generated_at }}</td>
                             </tr>
                         {% endfor %}
-                    </table>
-                {% else %}
-                    <div style="text-align: center; background: #1a1a1a; padding: 30px; border-radius: 0; box-shadow: 0 8px 15px rgba(0,0,0,0.8); border: 2px solid #8B0000;">
-                        <p style="font-size: 1.2em; color: #ccc;">No alerts found. Run main.py first to generate alerts.json.</p>
-                    </div>
-                {% endif %}
+                    </tbody>
+                </table>
             </div>
 
             <div id="charts" class="tab-content">
@@ -334,6 +338,50 @@ def dashboard():
             </div>
         </div>
         <script>
+            function fetchAlerts() {
+                fetch('/api/alerts')
+                    .then(response => response.json())
+                    .then(alerts => {
+                        const tbody = document.getElementById('alert-table-body');
+                        if (!tbody) return;
+                        tbody.innerHTML = '';
+                        let low = 0, medium = 0, high = 0;
+                        alerts.forEach(alert => {
+                            const row = document.createElement('tr');
+                            const alertType = alert.alert_type || 'BRUTE_FORCE';
+                            const ipUser = alert.ip_address || alert.username || 'N/A';
+                            const severity = alert.severity || 'N/A';
+                            const failedAttempts = alert.failed_attempt_count || 'N/A';
+                            const usernames = alert.targeted_usernames ? alert.targeted_usernames.join(', ') : 'N/A';
+                            const duration = alert.attack_duration || 'N/A';
+                            const generatedAt = alert.generated_at || 'N/A';
+                            if (severity === 'LOW') low++;
+                            if (severity === 'MEDIUM') medium++;
+                            if (severity === 'HIGH') high++;
+                            row.innerHTML = `
+                                <td>${alertType}</td>
+                                <td>${ipUser}</td>
+                                <td class="${severity}">${severity}</td>
+                                <td>${failedAttempts}</td>
+                                <td>${usernames}</td>
+                                <td>${duration}</td>
+                                <td>${generatedAt}</td>
+                            `;
+                            tbody.appendChild(row);
+                        });
+                        document.getElementById('total-alerts').textContent = alerts.length;
+                        document.getElementById('low-count').textContent = low;
+                        document.getElementById('medium-count').textContent = medium;
+                        document.getElementById('high-count').textContent = high;
+                    })
+                    .catch(err => console.error('Failed to fetch alerts:', err));
+            }
+
+            // Auto-poll every 5 seconds
+            setInterval(fetchAlerts, 5000);
+            // Run immediately on page load
+            fetchAlerts();
+
             let chartsCreated = false;
 
             function showTab(tabName) {
